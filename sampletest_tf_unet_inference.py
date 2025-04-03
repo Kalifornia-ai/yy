@@ -42,7 +42,7 @@ def run_inference(all_sig_mixture, soi_type, interference_sig_type):
     generate_soi, demod_soi = get_soi_generation_fn(soi_type)
 
     nn_model = unet.get_unet_model((sig_len, 2), k_sz=3, long_k_sz=101, k_neurons=32, lr=0.0003)
-    nn_model.load_weights(os.path.join('models', f'dataset_{soi_type.lower()}_{interference_sig_type.lower()}_mixture_unet', 'checkpoint'))
+    nn_model.load_weights(os.path.join('reference_models/models', f'dataset_{soi_type.lower()}_{interference_sig_type.lower()}_mixture_unet', 'checkpoint'))
 
     sig_mixture_comp = tf.stack((tf.math.real(all_sig_mixture), tf.math.imag(all_sig_mixture)), axis=-1)
     sig1_out = nn_model.predict(sig_mixture_comp, batch_size=100, verbose=1)
