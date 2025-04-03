@@ -1,3 +1,6 @@
+*
+!.gitignore
+!train_separation_from_pkl.py
 dataset/*
 tfds
 models
