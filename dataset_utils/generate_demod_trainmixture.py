@@ -17,7 +17,7 @@ get_pow = lambda s: np.mean(np.abs(s)**2, axis=-1)
 get_sinr = lambda s, i: get_pow(s)/get_pow(i)
 get_sinr_db = lambda s, i: get_db(get_sinr(s,i))
 
-sig_len = 40960         # number of samples in each waveform
+sig_len = 1000        # number of samples in each waveform
 default_n_per_batch = 100
 all_sinr = np.arange(-30, 0.1, 3)  # discrete SINR levels
 seed_number = 0
@@ -62,7 +62,8 @@ def get_soi_generation_fn(soi_sig_type):
                 freq_hz=freq_hz,
                 sample_rate=sample_rate,
                 amplitude=1.0,
-                phase=0.0
+                phase=0.0,
+                ebno_db=10
             )
             # For CW, we have no real "bits". Let's return placeholders
             # to match the 4-return structure. We'll just do zeros for bits
@@ -116,7 +117,8 @@ def generate_demod_testmixture(soi_type, interference_sig_type, n_per_batch=defa
                     freq_hz=freq_b,
                     sample_rate=sample_rate,
                     amplitude=1.0,    # adjust as needed
-                    phase=0.0
+                    phase=0.0,
+                    ebno_db=10
                 )
                 result_list.append(cw_b[0])  # shape [sig_len]
             
