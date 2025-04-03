@@ -12,7 +12,7 @@ from tqdm import tqdm
 #############################
 def parse_args():
     parser = argparse.ArgumentParser(description="Train LSTM separation from PKL dataset.")
-    parser.add_argument("--pkl_file", type=str, required=True,
+    parser.add_argument("--pkl_file", type=str, default="./dataset/Training_Dataset_BASEBAND_CW_SOI_BASEBAND_CW_INTERFERENCE.pkl", required=False,
                         help="Path to the .pkl file (e.g. dataset/Training_Dataset_...).")
     parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
