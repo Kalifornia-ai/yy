@@ -1,8 +1,9 @@
-dataset
+dataset/*
 tfds
 models
 torchmodels
 *RFCDEV*
+!dataset/Training_Dataset_BASEBAND_CW_SOI_BASEBAND_CW_INTERFERENCE.pkl
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
