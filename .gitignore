@@ -6,3 +6,5 @@
 !dataset/Training_Dataset_BASEBAND_CW_SOI_QPSK.pkl
 !results/
 !results/*
+!run_gen_and_train.py
+!dataset/Training_Dataset_*

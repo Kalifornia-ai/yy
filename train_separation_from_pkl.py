@@ -8,6 +8,7 @@ import argparse
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader, random_split
 from tqdm import tqdm
+import torch.nn.functional as F
 
 ########################################
 # 1) Arg Parsing
@@ -21,15 +22,20 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
     parser.add_argument("--output_dir", type=str, default="./results/",
-                        help="Output directory for saving best_model.pth")
+                        help="Output directory for saving best_model.pth and plots.")
     parser.add_argument("--train_split", type=float, default=0.64,
-                        help="Fraction of dataset for training (remaining is split into val/test)")
+                        help="Fraction of dataset for training (remaining is val/test)")
     parser.add_argument("--val_split", type=float, default=0.16,
                         help="Fraction of dataset for validation (rest is test)")
+    #
+    # New argument: sinr_db (so we can name model/plots accordingly)
+    #
+    parser.add_argument("--sinr_db", type=float, default=None,
+                        help="SINR in dB (used only for naming output files).")
     return parser.parse_args()
 
 ########################################
-# 2) PKL Dataset: single source
+# 2) PKL Dataset
 ########################################
 class SingleSourceDataset(Dataset):
     """
@@ -37,17 +43,23 @@ class SingleSourceDataset(Dataset):
       (all_sig_mixture, all_sig1, bits, meta_data)
       or
       (all_sig_mixture, all_sig1, all_sig2, bits, meta_data)
-    But we only care about so1 as the single source.
-
-    We'll store them as real+imag => shape (N, L, 2).
+    We only *require* so1; so2 is optional.
     """
     def __init__(self, pkl_file):
         super().__init__()
         with open(pkl_file, "rb") as f:
             data = pickle.load(f)
 
+        # We'll see if there's a so2 in the data
+        # (the 3rd item if length=5).
+        self.all_sig_mixture = None
+        self.all_sig1        = None
+        self.all_sig2        = None
+        self.all_bits1       = None
+        self.meta_data       = None
+
         if len(data) == 5:
-            self.all_sig_mixture, self.all_sig1, _, self.all_bits1, self.meta_data = data
+            self.all_sig_mixture, self.all_sig1, self.all_sig2, self.all_bits1, self.meta_data = data
         elif len(data) == 4:
             self.all_sig_mixture, self.all_sig1, self.all_bits1, self.meta_data = data
         else:
@@ -55,6 +67,11 @@ class SingleSourceDataset(Dataset):
 
         self.x_mixture = self._complex2twochannel(self.all_sig_mixture)
         self.x_so1     = self._complex2twochannel(self.all_sig1)
+
+        if self.all_sig2 is not None:
+            self.x_so2 = self._complex2twochannel(self.all_sig2)
+        else:
+            self.x_so2 = None
 
         self.N = self.x_mixture.shape[0]
 
@@ -64,11 +81,16 @@ class SingleSourceDataset(Dataset):
     def __getitem__(self, idx):
         mix_ri = self.x_mixture[idx]  # shape => (L, 2)
         so1_ri = self.x_so1[idx]      # (L, 2)
+        so2_ri = self.x_so2[idx] if (self.x_so2 is not None) else None
 
-        # Convert to Torch
         mix_t = torch.from_numpy(mix_ri)  # (L,2)
         so1_t = torch.from_numpy(so1_ri)
-        return (mix_t, so1_t)
+        if so2_ri is not None:
+            so2_t = torch.from_numpy(so2_ri)
+        else:
+            so2_t = torch.zeros_like(so1_t)  # or None
+
+        return (mix_t, so1_t, so2_t)
 
     @staticmethod
     def _complex2twochannel(arr_cx):
@@ -164,9 +186,8 @@ class LSTMSeperatorSingle(nn.Module):
 
         return torch.stack(out_sources, dim=1)  # => (b, 1, seq_len, 2)
 
-
 ########################################
-# 5) Single-Source Loss (SI-SNR or MSE)
+# 4) Loss Functions
 ########################################
 def si_snr_single(est, ref, eps=1e-8):
     """
@@ -184,12 +205,106 @@ def si_snr_single(est, ref, eps=1e-8):
     si_snr_value = 10*torch.log10(torch.sum(proj**2, dim=1)/(torch.sum(e**2,dim=1)+eps))
     return -si_snr_value.mean()
 
+def mse_loss_db(pred, target, eps=1e-8):
+    """
+    For demonstration: standard MSE, convert to dB scale.
+    This returns a single scalar in dB. We'll treat that as our 'loss.'
+    """
+    mse = F.mse_loss(pred, target, reduction='mean')
+    mse_db = 10*torch.log10(mse + eps)
+    #  # 3) Apply the smoothed logistic function
+    # M = 0.5 * (L + U)  # midpoint
+    # # L + (U-L) / [1 + exp(-alpha*(mse_dB - M))]
+    # loss = L + (U - L) / (1.0 + torch.exp(-alpha * (mse_db - M)))
+    # 3) Apply the smoothed logistic function
+    L = -50
+    U = 50
+    alpha = 0.1
+    M = 0.5 * (L + U)  # midpoint
+    # L + (U-L) / [1 + exp(-alpha*(mse_dB - M))]
+    loss = L + (U - L) / (1.0 + torch.exp(-alpha * (mse_db - M)))
+
+    # # 4) (Optional) clamp the final output
+    # #  -- Typically you'd saturate to [L, U], but often the sigmoid formula
+    # #     already does this in practice. If you want a strict clamp:
+    # # loss = torch.clamp(loss, min=L, max=U)
+
+    return loss
+
 ########################################
-# 6) Main Script
+# 5) Helper: Time & Frequency Plots
+########################################
+def plot_time_and_freq(mix_ri, so1_ri, est_ri, so2_ri=None,
+                       plot_dir="./results", prefix="sample0"):
+    """
+    mix_ri, so1_ri, est_ri => shape (T,2) real+imag
+    so2_ri => shape (T,2) if available
+    Saves time-domain and freq-domain plots to plot_dir with names:
+       prefix_time.png
+       prefix_fft.png
+    """
+    os.makedirs(plot_dir, exist_ok=True)
+
+    # Time-domain: real+imag
+    fig, axes = plt.subplots(3 if so2_ri is None else 4, 2, figsize=(10,10), sharex=True)
+    fig.suptitle(f"Time-Domain: {prefix}")
+    row = 0
+    for name, data in [("Mixture", mix_ri), ("SOI (True)", so1_ri), ("Estimate", est_ri)]:
+        axes[row,0].plot(data[:,0], color='b', label="Real")
+        axes[row,0].set_ylabel(name+" Real")
+        axes[row,1].plot(data[:,1], color='r', label="Imag")
+        axes[row,1].set_ylabel(name+" Imag")
+        row+=1
+    if so2_ri is not None:
+        # Interference row
+        axes[row,0].plot(so2_ri[:,0], color='b')
+        axes[row,0].set_ylabel("Interf Real")
+        axes[row,1].plot(so2_ri[:,1], color='r')
+        axes[row,1].set_ylabel("Interf Imag")
+
+    plt.tight_layout()
+    out_path1 = os.path.join(plot_dir, f"{prefix}_time.png")
+    plt.savefig(out_path1, dpi=150)
+    plt.close()
+
+    # Frequency-domain
+    # We'll do magnitude spectrum for brevity, but you can do real/imag or log-scale, etc.
+    def get_magnitude_spectrum(sig_ri):
+        # sig_ri => (T,2)
+        # Convert to complex => shape (T,)
+        cplx = sig_ri[:,0] + 1j*sig_ri[:,1]
+        spec = np.fft.fftshift(np.fft.fft(cplx))
+        mag  = np.abs(spec)
+        return mag
+
+    mix_mag = get_magnitude_spectrum(mix_ri)
+    so1_mag = get_magnitude_spectrum(so1_ri)
+    est_mag = get_magnitude_spectrum(est_ri)
+    so2_mag = get_magnitude_spectrum(so2_ri) if so2_ri is not None else None
+    freqs   = np.arange(len(mix_mag)) - (len(mix_mag)//2)
+
+    fig2, ax2 = plt.subplots(figsize=(10,6))
+    ax2.plot(freqs, mix_mag, label="Mixture")
+    ax2.plot(freqs, so1_mag, label="SOI True")
+    ax2.plot(freqs, est_mag, label="SOI Est", linestyle="--")
+    if so2_mag is not None:
+        ax2.plot(freqs, so2_mag, label="Interference", linestyle=":")
+    ax2.set_title(f"FFT Magnitude: {prefix}")
+    ax2.legend()
+    ax2.set_xlabel("FFT Bins (shifted)")
+    out_path2 = os.path.join(plot_dir, f"{prefix}_fft.png")
+    plt.savefig(out_path2, dpi=150)
+    plt.close()
+
+########################################
+# 6) Main
 ########################################
 def main():
     args = parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # If the user gave a sinr_db, we can incorporate it into naming.
+    sinr_tag = f"_SINR{args.sinr_db}dB" if args.sinr_db is not None else ""
 
     print("Loading dataset from:", args.pkl_file)
     ds = SingleSourceDataset(args.pkl_file)
@@ -200,7 +315,8 @@ def main():
     test_len  = total_len - train_len - val_len
     print(f"Total samples={total_len}, => train={train_len}, val={val_len}, test={test_len}")
 
-    train_ds, val_ds, test_ds = random_split(ds, [train_len, val_len, test_len], generator=torch.Generator().manual_seed(42))
+    train_ds, val_ds, test_ds = random_split(ds, [train_len, val_len, test_len], 
+                                             generator=torch.Generator().manual_seed(42))
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
     val_loader   = DataLoader(val_ds,   batch_size=args.batch_size, shuffle=False)
     test_loader  = DataLoader(test_ds,  batch_size=args.batch_size, shuffle=False)
@@ -210,18 +326,22 @@ def main():
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     best_val_loss = float('inf')
 
+    # Make subdirectory for results of this run
+    run_plot_dir = os.path.join(args.output_dir, f"plots{sinr_tag}")
+    os.makedirs(run_plot_dir, exist_ok=True)
+
     # Train
     for epoch in range(args.epochs):
         model.train()
         running_loss=0.
-        for mix, so1 in train_loader:
+        for mix, so1, so2 in train_loader:
             mix, so1 = mix.to(device), so1.to(device)
             optimizer.zero_grad()
             est = model(mix)  # => (b,1,T,2)
-            # shape => (b,T,2)
-            est_s1 = est[:,0]
-            # compute loss => si_snr_single
-            loss = si_snr_single(est_s1, so1)
+            est_s1 = est[:,0]  # => (b,T,2)
+
+            # Use MSE in dB (example) or SI-SNR:
+            loss = si_snr_single(est_s1, so1)  
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
@@ -231,7 +351,7 @@ def main():
         model.eval()
         val_loss_sum=0.
         with torch.no_grad():
-            for mix, so1 in val_loader:
+            for mix, so1, so2 in val_loader:
                 mix, so1 = mix.to(device), so1.to(device)
                 est = model(mix)
                 est_s1 = est[:,0]
@@ -242,58 +362,51 @@ def main():
         print(f"Epoch {epoch+1}/{args.epochs}: train={epoch_train_loss:.4f}, val={epoch_val_loss:.4f}")
         if epoch_val_loss<best_val_loss:
             best_val_loss=epoch_val_loss
-            torch.save(model.state_dict(), os.path.join(args.output_dir,"best_model.pth"))
-            print(f"Saved best model at epoch {epoch+1}")
+            # Save model with a name that includes the sinr tag
+            model_save_path = os.path.join(args.output_dir, f"best_model{sinr_tag}.pth")
+            torch.save(model.state_dict(), model_save_path)
+            print(f"Saved best model at epoch {epoch+1} => {model_save_path}")
 
     # test
-    model.load_state_dict(torch.load(os.path.join(args.output_dir,"best_model.pth"),map_location=device))
+    model_save_path = os.path.join(args.output_dir, f"best_model{sinr_tag}.pth")
+    model.load_state_dict(torch.load(model_save_path, map_location=device))
     model.eval()
     test_loss_sum=0.
     with torch.no_grad():
-        for mix, so1 in test_loader:
+        for mix, so1, so2 in test_loader:
             mix, so1 = mix.to(device), so1.to(device)
             est = model(mix)
             est_s1 = est[:,0]
             test_loss = si_snr_single(est_s1, so1)
             test_loss_sum+=test_loss.item()
     final_test_loss=test_loss_sum/len(test_loader)
-    print(f"Final test loss: {final_test_loss:.4f}")
+    print(f"Final test loss (SI-SNR): {final_test_loss:.4f}")
 
-    # Plot first item from first test batch
-    mix_batch, so1_batch = next(iter(test_loader))
-    mix_batch, so1_batch = mix_batch.to(device), so1_batch.to(device)
+    # Print final train/val from last epoch
+    final_train_loss = epoch_train_loss
+    final_val_loss   = epoch_val_loss
+    print(f"FINAL_TRAIN_LOSS={final_train_loss:.4f}")
+    print(f"FINAL_VAL_LOSS={final_val_loss:.4f}")
+    print(f"FINAL_TEST_LOSS={final_test_loss:.4f}")
+
+    # Plot a sample from test set
+    mix_batch, so1_batch, so2_batch = next(iter(test_loader))
+    mix_batch, so1_batch, so2_batch = mix_batch.to(device), so1_batch.to(device), so2_batch.to(device)
     with torch.no_grad():
         est_out = model(mix_batch)  # => (b,1,T,2)
     # pick item 0
     mixture_0 = mix_batch[0].cpu().numpy()  # shape => (T,2)
     so1_0     = so1_batch[0].cpu().numpy()  # shape => (T,2)
+    so2_0     = so2_batch[0].cpu().numpy()  # shape => (T,2) only if it was real interference
     est_s1_0  = est_out[0,0].cpu().numpy()  # (T,2)
 
-    # We do 2 rows => mixture row, so1 row (GT vs. Est)
-    fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(10,6))
-    t_axis = np.arange(mixture_0.shape[0])
-
-    # Row 1 => mixture
-    axes[0,0].plot(t_axis, mixture_0[:,0], label="Mix Real")
-    axes[0,0].set_title("Mixture Real")
-    axes[0,1].plot(t_axis, mixture_0[:,1], label="Mix Imag")
-    axes[0,1].set_title("Mixture Imag")
-
-    # Row 2 => so1
-    axes[1,0].plot(t_axis, so1_0[:,0], label="GT Real")
-    axes[1,0].plot(t_axis, est_s1_0[:,0], label="Est Real", linestyle="--")
-    axes[1,0].set_title("SOI Real")
-    axes[1,0].legend()
-
-    axes[1,1].plot(t_axis, so1_0[:,1], label="GT Imag")
-    axes[1,1].plot(t_axis, est_s1_0[:,1], label="Est Imag", linestyle="--")
-    axes[1,1].set_title("SOI Imag")
-    axes[1,1].legend()
-
-    plt.tight_layout()
-    plt.show()
+    # Generate time & frequency plots => store in run_plot_dir
+    sample_prefix = "testSample0" + sinr_tag
+    plot_time_and_freq(mixture_0, so1_0, est_s1_0, so2_0, 
+                       plot_dir=run_plot_dir, prefix=sample_prefix)
 
 if __name__=="__main__":
     args = parse_args()
     main()
+
 
