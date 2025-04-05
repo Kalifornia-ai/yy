@@ -341,7 +341,7 @@ def main():
             est_s1 = est[:,0]  # => (b,T,2)
 
             # Use MSE in dB (example) or SI-SNR:
-            loss = si_snr_single(est_s1, so1)  
+            loss = mse_loss_db(est_s1, so1)  
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
@@ -355,7 +355,7 @@ def main():
                 mix, so1 = mix.to(device), so1.to(device)
                 est = model(mix)
                 est_s1 = est[:,0]
-                val_loss = si_snr_single(est_s1, so1)
+                val_loss = mse_loss_db(est_s1, so1)
                 val_loss_sum+= val_loss.item()
         epoch_val_loss = val_loss_sum/len(val_loader)
 
@@ -377,7 +377,7 @@ def main():
             mix, so1 = mix.to(device), so1.to(device)
             est = model(mix)
             est_s1 = est[:,0]
-            test_loss = si_snr_single(est_s1, so1)
+            test_loss = mse_loss_db(est_s1, so1)
             test_loss_sum+=test_loss.item()
     final_test_loss=test_loss_sum/len(test_loader)
     print(f"Final test loss (SI-SNR): {final_test_loss:.4f}")
