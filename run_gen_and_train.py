@@ -41,8 +41,8 @@ def main():
     # Arguments for data generation
     parser.add_argument("--gen_script", type=str, default="./dataset_utils/generate_demod_trainmixture.py",
                         help="Data generation script.")
-    parser.add_argument("--soi_sig_type", type=str, required=True)
-    parser.add_argument("--interference_sig_type", type=str, required=True)
+    parser.add_argument("--soi_sig_type", type=str, default="BASEBAND_CW_SOI",  required=False)
+    parser.add_argument("--interference_sig_type", type=str, default="QPSK", required=False)
     parser.add_argument("--n_per_batch", type=int, default=100)
 
     # Optionally skip data generation

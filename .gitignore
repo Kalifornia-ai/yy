@@ -8,3 +8,8 @@
 !results/*
 !run_gen_and_train.py
 !dataset/Training_Dataset_*
+!results/plots*
+!loss_curves_vs_sinr.png
+!results/
+!results/plots*/
+!results/plots*/**
