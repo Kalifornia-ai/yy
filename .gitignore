@@ -8,3 +8,4 @@
 !results/*
 !run_gen_and_train.py
 !dataset/Training_Dataset_*
+!results/plots*
