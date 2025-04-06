@@ -52,7 +52,7 @@ def main():
     # Arguments for training
     parser.add_argument("--train_script", type=str, default="train_separation_from_pkl.py",
                         help="Training script path.")
-    parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--output_dir", type=str, default="./results")
