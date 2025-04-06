@@ -16,7 +16,7 @@ def parse_args():
     parser.add_argument("--pkl_file", type=str,
                         default="./dataset/Training_Dataset_BASEBAND_CW_SOI_QPSK.pkl",
                         help="Path to the .pkl dataset (single source + mixture).")
-    parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
+    parser.add_argument("--epochs", type=int, default=20, help="Number of epochs")
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
     parser.add_argument("--output_dir", type=str, default="./results/",
@@ -196,15 +196,25 @@ def mse_loss_db(pred, target, eps=1e-8):
     """
     import torch.nn.functional as F
     mse = F.mse_loss(pred, target, reduction='mean')
-    mse_db = 10 * torch.log10(mse + eps)
+    mse_db = 10*torch.log10(mse + eps)
+    #  # 3) Apply the smoothed logistic function
+    # M = 0.5 * (L + U)  # midpoint
+    # # L + (U-L) / [1 + exp(-alpha*(mse_dB - M))]
+    # loss = L + (U - L) / (1.0 + torch.exp(-alpha * (mse_db - M)))
+    # 3) Apply the smoothed logistic function
+   # L = -100
+    #U = 50
+    #alpha = 0.1
+    #M = 0.5 * (L + U)  # midpoint
+    #L + (U-L) / [1 + exp(-alpha*(mse_dB - M))]
+    #loss = L + (U - L) / (1.0 + torch.exp(-alpha * (mse_db - M)))
 
-    # example logistic bounding
-    L = -100
-    U = 50
-    alpha = 0.1
-    M = 0.5 * (L + U)
-    loss = L + (U - L) / (1.0 + torch.exp(-alpha * (mse_db - M)))
-    return loss
+    # # 4) (Optional) clamp the final output
+    # #  -- Typically you'd saturate to [L, U], but often the sigmoid formula
+    # #     already does this in practice. If you want a strict clamp:
+    # # loss = torch.clamp(loss, min=L, max=U)
+
+    return mse_db
 
 ########################################
 # 5) Main
