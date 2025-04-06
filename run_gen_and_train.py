@@ -147,9 +147,9 @@ def main():
         #      --test_pkl => e.g. ./results/test_subset_SINR{sinr_db}.pkl
         #      --model_file => e.g. ./results/best_model_SINR{sinr_db}.pth
         # plus --band_col_idx => your meta col index
-        test_pkl_name = f"test_subset_SINR{float(sinr_db)}.pkl"
+        test_pkl_name = f"test_subset_SINR{float(sinr_db)}dB.pkl"
         test_pkl_path = os.path.join(args.output_dir, test_pkl_name)
-        best_model_path = os.path.join(args.output_dir, f"best_model_SINR{float(sinr_db)}.pth")
+        best_model_path = os.path.join(args.output_dir, f"best_model_SINR{float(sinr_db)}dB.pth")
 
         if not os.path.isfile(test_pkl_path):
             print(f"WARNING: {test_pkl_path} not found, skipping in-band/out-of-band plotting.")
