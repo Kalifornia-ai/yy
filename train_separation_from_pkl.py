@@ -18,7 +18,7 @@ def parse_args():
     parser.add_argument("--pkl_file", type=str,
                         default="./dataset/Training_Dataset_BASEBAND_CW_SOI_QPSK.pkl",
                         help="Path to the .pkl dataset (single source + mixture).")
-    parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
+    parser.add_argument("--epochs", type=int, default=20, help="Number of epochs")
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
     parser.add_argument("--output_dir", type=str, default="./results/",
