@@ -54,42 +54,65 @@ class TestSubsetDataset:
         meta_row = self.meta[idx] if self.meta is not None else None
         return (mix_ri, so1_ri, so2_ri, meta_row)
 
+
 ###############################################
 # 2) Plotting utilities
 ###############################################
 def plot_time_and_freq(mix_ri, so1_ri, est_ri, so2_ri=None,
-                       plot_path="plot.png", title_prefix=""):
+                       plot_path="plot.png", title_prefix="",
+                       freq_val_hz=None):
     """
-    Plots time-domain and frequency-domain magnitude for mixture, so1, estimate, and optional so2.
+    Plots:
+      - Time-domain waveforms for Mixture, SOI, Estimate, and Interference (if present)
+      - Frequency-domain magnitude for all four signals
     Saves to 'plot_path', producing two PNGs (time/freq).
+
+    If freq_val_hz is provided, we append that to the figure title.
     """
-    fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(10,6))
+
+    # 1) Prepare figure title
+    if freq_val_hz is not None:
+        title_prefix += f" | InterfFreq={freq_val_hz/1e6:.2f}MHz"
+
+    # 2) Time-Domain
+    # We'll do 3 or 4 rows depending on whether so2_ri is None or not
+    # but in your code, so2_ri is never None if x_so2 was not stored; it's zeros
+    # so let's just do 3 rows if we definitely want to show interference
+    fig_rows = 3
+    fig, axes = plt.subplots(nrows=fig_rows, ncols=2, figsize=(10,9), sharex=True)
     fig.suptitle(title_prefix)
 
     t_axis = np.arange(len(mix_ri))
 
-    # Time-domain, row=0 => mixture
-    axs[0,0].plot(t_axis, mix_ri[:,0], label="Mix Real", color='b')
-    axs[0,0].set_title("Mixture Real")
-    axs[0,1].plot(t_axis, mix_ri[:,1], label="Mix Imag", color='r')
-    axs[0,1].set_title("Mixture Imag")
+    # Row 0 => mixture
+    axes[0,0].plot(t_axis, mix_ri[:,0], color='b')
+    axes[0,0].set_ylabel("Mix Real")
+    axes[0,1].plot(t_axis, mix_ri[:,1], color='r')
+    axes[0,1].set_ylabel("Mix Imag")
 
-    # Time-domain, row=1 => so1 vs estimate
-    axs[1,0].plot(t_axis, so1_ri[:,0], label="SOI Real", color='b')
-    axs[1,0].plot(t_axis, est_ri[:,0], label="Est Real", linestyle='--', color='g')
-    axs[1,0].set_title("SOI vs. Est Real")
-    axs[1,0].legend()
+    # Row 1 => so1 vs estimate
+    axes[1,0].plot(t_axis, so1_ri[:,0], label="SOI Real", color='b')
+    axes[1,0].plot(t_axis, est_ri[:,0], label="Est Real", linestyle='--', color='g')
+    axes[1,0].set_ylabel("SOI/Est Real")
+    axes[1,0].legend()
 
-    axs[1,1].plot(t_axis, so1_ri[:,1], label="SOI Imag", color='r')
-    axs[1,1].plot(t_axis, est_ri[:,1], label="Est Imag", linestyle='--', color='g')
-    axs[1,1].set_title("SOI vs. Est Imag")
-    axs[1,1].legend()
+    axes[1,1].plot(t_axis, so1_ri[:,1], label="SOI Imag", color='r')
+    axes[1,1].plot(t_axis, est_ri[:,1], label="Est Imag", linestyle='--', color='g')
+    axes[1,1].set_ylabel("SOI/Est Imag")
+    axes[1,1].legend()
+
+    # Row 2 => Interference so2
+    axes[2,0].plot(t_axis, so2_ri[:,0], color='b')
+    axes[2,0].set_ylabel("Interf Real")
+    axes[2,1].plot(t_axis, so2_ri[:,1], color='r')
+    axes[2,1].set_ylabel("Interf Imag")
 
     plt.tight_layout()
-    plt.savefig(plot_path.replace(".png","_time.png"), dpi=150)
+    out_path_time = plot_path.replace(".png","_time.png")
+    plt.savefig(out_path_time, dpi=150)
     plt.close()
 
-    # Frequency-domain
+    # 3) Frequency-Domain
     def get_mag_spectrum(sig_ri):
         cplx = sig_ri[:,0] + 1j*sig_ri[:,1]
         spec = np.fft.fftshift(np.fft.fft(cplx))
@@ -99,25 +122,26 @@ def plot_time_and_freq(mix_ri, so1_ri, est_ri, so2_ri=None,
     mix_mag = get_mag_spectrum(mix_ri)
     so1_mag = get_mag_spectrum(so1_ri)
     est_mag = get_mag_spectrum(est_ri)
-    so2_mag = get_mag_spectrum(so2_ri) if (so2_ri is not None) else None
+    so2_mag = get_mag_spectrum(so2_ri)
+
     freq_bins = np.arange(len(mix_mag)) - (len(mix_mag)//2)
 
     plt.figure(figsize=(10,6))
     plt.plot(freq_bins, mix_mag, label="Mixture", color='b')
     plt.plot(freq_bins, so1_mag, label="SOI", color='r')
     plt.plot(freq_bins, est_mag, label="Estimate", color='g', linestyle='--')
-    if so2_mag is not None:
-        plt.plot(freq_bins, so2_mag, label="Interf", color='k', linestyle=':')
+    plt.plot(freq_bins, so2_mag, label="Interf", color='k', linestyle=':')
     plt.title(title_prefix + " (FFT Magnitude)")
     plt.xlabel("FFT Bin (shifted)")
     plt.ylabel("Amplitude")
     plt.legend()
     plt.tight_layout()
-    plt.savefig(plot_path.replace(".png","_freq.png"), dpi=150)
+    out_path_freq = plot_path.replace(".png","_freq.png")
+    plt.savefig(out_path_freq, dpi=150)
     plt.close()
 
 ###############################################
-# 3) Model definition (must match training)
+# 3) Model definition (must match training script)
 ###############################################
 import torch
 import torch.nn as nn
@@ -200,16 +224,21 @@ class LSTMSeperatorSingle(nn.Module):
 ###############################################
 def main():
     parser = argparse.ArgumentParser(
-        description="Automatically pick in-band and out-of-band samples from test data (with meta) and plot."
+        description="Automatically pick in-band and out-of-band samples from test data (with meta) and plot + show interference freq"
     )
-    parser.add_argument("--test_pkl", type=str, required=True,
-                        help="Path to the test_subset PKL (with 'meta' that has band_label).")
-    parser.add_argument("--model_file", type=str, required=True,
+    parser.add_argument("--test_pkl", type=str, default="./results/test_subset_SINR0.0dB.pkl",
+                        help="Path to the test_subset PKL (with 'meta' that has band_label + freq).")
+    parser.add_argument("--model_file", type=str, default="./results/best_model_SINR0.0dB.pth",
                         help="Path to best_model.pth checkpoint.")
     parser.add_argument("--output_dir", type=str, default="./test_plots",
                         help="Where to save plots.")
     parser.add_argument("--band_col_idx", type=int, default=5,
                         help="Index in meta row that stores the band label (1=inband,0=outband).")
+    #
+    # freq_col_idx is the column in meta row that holds the interference freq
+    #
+    parser.add_argument("--freq_col_idx", type=int, default=4,
+                        help="Index in meta row that stores the interference frequency in Hz.")
 
     args = parser.parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
@@ -230,14 +259,21 @@ def main():
     inband_sample = None
     outband_sample = None
 
-    # 3) Find first in-band (band_label=1) and first out-of-band (0)
+    # 3) Find first in-band (band_label=1) and out-of-band (0)
     for i in range(len(ds)):
         mix_ri, so1_ri, so2_ri, meta_row = ds.get_item(i)
-        band_label = meta_row[args.band_col_idx]
+        if meta_row is None:
+            continue
+
+        band_label = float(meta_row[args.band_col_idx])
+        # gather freq in Hz from meta
+        freq_hz = float(meta_row[args.freq_col_idx])
+
         if band_label == 1.0 and (inband_sample is None):
-            inband_sample = (i, mix_ri, so1_ri, so2_ri)
+            inband_sample = (i, mix_ri, so1_ri, so2_ri, freq_hz)
         elif band_label == 0.0 and (outband_sample is None):
-            outband_sample = (i, mix_ri, so1_ri, so2_ri)
+            outband_sample = (i, mix_ri, so1_ri, so2_ri, freq_hz)
+
         if inband_sample and outband_sample:
             break
 
@@ -250,7 +286,7 @@ def main():
     def run_and_plot(sample_tuple, label):
         if sample_tuple is None:
             return
-        idx, mix_ri, so1_ri, so2_ri = sample_tuple
+        idx, mix_ri, so1_ri, so2_ri, freq_hz = sample_tuple
 
         # Forward pass
         mix_t = torch.from_numpy(mix_ri).unsqueeze(0).to(device)
@@ -261,9 +297,11 @@ def main():
         # Save plots
         out_path = os.path.join(args.output_dir, f"{label}_idx{idx}.png")
         title_str = f"{label} (test idx={idx})"
+        # pass freq_hz => plot_time_and_freq can show in figure title
         plot_time_and_freq(mix_ri, so1_ri, est_ri, so2_ri,
                            plot_path=out_path,
-                           title_prefix=title_str)
+                           title_prefix=title_str,
+                           freq_val_hz=freq_hz)
 
     run_and_plot(inband_sample,  "inband_sample")
     run_and_plot(outband_sample, "outband_sample")
