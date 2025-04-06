@@ -217,19 +217,19 @@ def mse_loss_db(pred, target, eps=1e-8):
     # # L + (U-L) / [1 + exp(-alpha*(mse_dB - M))]
     # loss = L + (U - L) / (1.0 + torch.exp(-alpha * (mse_db - M)))
     # 3) Apply the smoothed logistic function
-    L = -100
-    U = 50
-    alpha = 0.1
-    M = 0.5 * (L + U)  # midpoint
-    # L + (U-L) / [1 + exp(-alpha*(mse_dB - M))]
-    loss = L + (U - L) / (1.0 + torch.exp(-alpha * (mse_db - M)))
+   # L = -100
+    #U = 50
+    #alpha = 0.1
+    #M = 0.5 * (L + U)  # midpoint
+    #L + (U-L) / [1 + exp(-alpha*(mse_dB - M))]
+    #loss = L + (U - L) / (1.0 + torch.exp(-alpha * (mse_db - M)))
 
     # # 4) (Optional) clamp the final output
     # #  -- Typically you'd saturate to [L, U], but often the sigmoid formula
     # #     already does this in practice. If you want a strict clamp:
     # # loss = torch.clamp(loss, min=L, max=U)
 
-    return loss
+    return mse_db
 
 ########################################
 # 5) Helper: Time & Frequency Plots
