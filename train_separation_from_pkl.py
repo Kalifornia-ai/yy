@@ -217,7 +217,7 @@ def mse_loss_db(pred, target, eps=1e-8):
     # # L + (U-L) / [1 + exp(-alpha*(mse_dB - M))]
     # loss = L + (U - L) / (1.0 + torch.exp(-alpha * (mse_db - M)))
     # 3) Apply the smoothed logistic function
-    L = -50
+    L = -100
     U = 50
     alpha = 0.1
     M = 0.5 * (L + U)  # midpoint
